@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Symulator Warzelni – Android Animacje</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body { background:#0f1720; color:white; font-family:Arial; margin:0; padding:0; }
+canvas { background:#111; display:block; margin:0 auto; border:1px solid #333; }
+.panel { padding:10px; text-align:center; }
+button, input[type=range] { padding:15px; margin:5px; font-size:18px; }
+</style>
+</head>
+<body>
+
+<h2 style="text-align:center;">🍺 Symulator Warzelni – Android Animacje</h2>
+
+<div class="panel">
+<b>Warzelnia (Zacieranie)</b><br>
+Moc pary: <input type="range" id="heatMash" min="0" max="100" value="0"><br>
+Obroty mieszadła: <input type="range" id="rpmMash" min="0" max="100" value="50"><br>
+
+<b>Filtracja (Sparging)</b><br>
+Obroty mieszadła: <input type="range" id="rpmFilter" min="0" max="100" value="30"><br>
+
+<b>Whirlpool</b><br>
+Moc pary dolna: <input type="range" id="heatWhirlpool" min="0" max="100" value="0"><br>
+Moc pary boczna: <input type="range" id="heatWhirlpoolSide" min="0" max="100" value="0"><br>
+Obroty mieszadła: <input type="range" id="rpmWhirlpool" min="0" max="100" value="40"><br>
+
+<b>Etap procesu:</b> <span id="stageLabel">Puste</span><br>
+<button onclick="prevStep()">⬅ Poprzedni krok</button>
+<button onclick="nextStep()">Następny krok ➡</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+// --- Dopasowanie do ekranu telefonu ---
+function resizeCanvas(){
+  canvas.width = window.innerWidth - 20;
+  canvas.height = window.innerHeight*0.55;
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// --- Zbiornik ---
+class Tank{
+  constructor(name,x){
+    this.name=name; this.x=x;
+    this.capacity=700; this.volume=0;
+    this.temp=20; this.pressure=1;
+    this.rpm=0; this.heat=0;
+    this.mixerAngle=0;
+  }
+  update(dt){
+    let heatPower = this.heat*0.1;
+    let loss = 0.03*(this.temp-20);
+    this.temp += (heatPower - loss)*(dt/0.1);
+    if(this.temp>100) this.temp=100;
+    this.pressure = 1 + Math.max(0,(this.temp-100)*0.05);
+    this.temp += (this.rpm-50)*0.005;
+    // obrót mieszadła
+    this.mixerAngle += this.rpm*0.1*dt;
+  }
+  draw(color){
+    let w = canvas.width/6, h = canvas.height/2;
+    ctx.strokeStyle="white";
+    ctx.strokeRect(this.x,120,w,h);
+    let level=(this.volume/this.capacity)*h;
+    ctx.fillStyle=color;
+    ctx.fillRect(this.x,120+h-level,w,level);
+    ctx.fillStyle="white";
+    ctx.fillText(this.name,this.x,110);
+    ctx.fillText(`T: ${this.temp.toFixed(1)}°C`,this.x,120+h+20);
+    ctx.fillText(`P: ${this.pressure.toFixed(2)} bar`,this.x,120+h+40);
+    ctx.fillText(`${this.volume.toFixed(0)} L`,this.x,120+h+60);
+
+    if(this.temp>90) drawSteam(this.x+w/2,120);
+    drawMixer(this.x+w/2,120+h/2,this.mixerAngle);
+  }
+}
+
+// --- Animacja pary ---
+function drawSteam(x,y){
+  ctx.fillStyle="rgba(255,100,100,0.4)";
+  for(let i=0;i<6;i++){
+    ctx.beginPath();
+    ctx.arc(x+Math.random()*30-15,y-Math.random()*40,12,0,Math.PI*2);
+    ctx.fill();
+  }
+}
+
+// --- Animacja mieszadła ---
+function drawMixer(x,y,angle){
+  ctx.save();
+  ctx.translate(x,y);
+  ctx.rotate(angle);
+  ctx.strokeStyle="white";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(-20,0); ctx.lineTo(20,0); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0,-20); ctx.lineTo(0,20); ctx.stroke();
+  ctx.restore();
+}
+
+// --- Zbiorniki ---
+let mash = new Tank("Warzelnia",canvas.width/10);
+let filter = new Tank("Filtracja",canvas.width/2.5);
+let whirl = new Tank("Whirlpool",canvas.width/1.5);
+
+// --- Pompy ---
+let pumpMashFilter=false;
+let pumpFilterWhirl=false;
+
+// --- Kroki procesu ---
+let steps=[
+  "Puste",
+  "Nalewanie wody do zaciernego",
+  "Nalewanie wody do whirlpoola",
+  "Podgrzewanie wody",
+  "Sypanie ziarna",
+  "Zacieranie",
+  "Filtracja + Sparging",
+  "Whirlpool / Warzenie",
+  "Chłodzenie"
+];
+
+let stepIndex=0;
+document.getElementById("stageLabel").innerText=steps[stepIndex];
+
+function nextStep(){
+  stepIndex=Math.min(stepIndex+1, steps.length-1);
+  document.getElementById("stageLabel").innerText=steps[stepIndex];
+  updatePumpsAndVolumes();
+}
+function prevStep(){
+  stepIndex=Math.max(stepIndex-1,0);
+  document.getElementById("stageLabel").innerText=steps[stepIndex];
+  updatePumpsAndVolumes();
+}
+
+// --- Aktualizacja przepływów i objętości zależnie od kroku ---
+function updatePumpsAndVolumes(){
+  switch(stepIndex){
+    case 0:
+      mash.volume=0; filter.volume=0; whirl.volume=0;
+      pumpMashFilter=false; pumpFilterWhirl=false; break;
+    case 1: mash.volume=350; break;
+    case 2: whirl.volume=350; break;
+    case 3: mash.heat=50; whirl.heat=30; break;
+    case 4: mash.volume+=50; break;
+    case 5: mash.rpm=50; break;
+    case 6: pumpMashFilter=true; break;
+    case 7: pumpFilterWhirl=true; whirl.rpm=40; break;
+    case 8: mash.heat=0; whirl.heat=0; break;
+  }
+}
+
+// --- Transfer cieczy i animowane kropki przepływu ---
+let flowDots = [];
+function transfer(){
+  // Mash -> Filter
+  if((stepIndex>=6) && mash.volume>2){
+    mash.volume-=2; filter.volume+=2;
+    flowDots.push({x:canvas.width/10+canvas.width/6, y:120+canvas.height/4, dx:3, dy:0, color:"#FFA500"});
+  }
+  // Filter -> Whirlpool
+  if((stepIndex>=7) && filter.volume>2){
+    filter.volume-=2; whirl.volume+=2;
+    flowDots.push({x:canvas.width/2.5+canvas.width/6, y:120+canvas.height/4, dx:3, dy:0, color:"#FFFF00"});
+  }
+}
+
+// --- Rysowanie przepływających kropek ---
+function drawFlowDots(){
+  for(let i=0;i<flowDots.length;i++){
+    let dot = flowDots[i];
+    ctx.fillStyle=dot.color;
+    ctx.beginPath(); ctx.arc(dot.x,dot.y,8,0,Math.PI*2); ctx.fill();
+    dot.x += dot.dx;
+    dot.y += dot.dy;
+    // usuń, jeśli poza ekranem
+    if(dot.x>canvas.width) flowDots.splice(i,1); i--;
+  }
+}
+
+// --- Rury kolorowane ---
+function drawPipes(){
+  let colorMF = stepIndex<6 ? "#999" : "#FFA500";
+  ctx.strokeStyle=colorMF; ctx.lineWidth=6;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width/10+canvas.width/6,120+canvas.height/4);
+  ctx.lineTo(canvas.width/2.5,120+canvas.height/4); ctx.stroke();
+
+  ctx.strokeStyle = stepIndex<7 ? "#999" : "#FFFF00";
+  ctx.beginPath();
+  ctx.moveTo(canvas.width/2.5+canvas.width/6,120+canvas.height/4);
+  ctx.lineTo(canvas.width/1.5,120+canvas.height/4); ctx.stroke();
+}
+
+// --- Update ---
+function update(dt){
+  mash.heat=parseFloat(document.getElementById("heatMash").value);
+  mash.rpm=parseFloat(document.getElementById("rpmMash").value);
+  filter.rpm=parseFloat(document.getElementById("rpmFilter").value);
+  whirl.heat=parseFloat(document.getElementById("heatWhirlpool").value);
+  whirl.rpm=parseFloat(document.getElementById("rpmWhirlpool").value);
+  let heatSide=parseFloat(document.getElementById("heatWhirlpoolSide").value);
+  if(stepIndex>=7) whirl.temp+=heatSide*0.02*(dt/0.1);
+
+  mash.update(dt); filter.update(dt); whirl.update(dt);
+  transfer();
+}
+
+// --- Draw ---
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  mash.draw(stepIndex>=4? "#FFA500": "#00BFFF");
+  filter.draw(stepIndex>=6? "#FFFF00" : "#00BFFF");
+  whirl.draw(stepIndex>=2? "#00BFFF" : "#000");
+  drawPipes();
+  drawFlowDots();
+}
+
+// --- Loop ---
+let last=Date.now();
+function loop(){
+  let now=Date.now();
+  let dt=(now-last)/1000; last=now;
+  update(dt); draw();
+  requestAnimationFrame(loop);
+}
+loop();
+
+</script>
+</body>
+</html>
